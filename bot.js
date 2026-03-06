@@ -1,22 +1,3 @@
-require('dotenv').config();
-
-const { Telegraf } = require('telegraf');
-const axios = require('axios');
-const http = require('http');
-
-const bot = new Telegraf(process.env.BOT_TOKEN);
-
-const API_URL = process.env.API_URL || 'https://syt-wallet-backend.onrender.com';
-const MINI_APP_URL = process.env.MINI_APP_URL;
-
-// ✅ Port وهمي لـ Render
-const PORT = process.env.PORT || 3000;
-http.createServer((req, res) => {
-  res.writeHead(200);
-  res.end('Bot is running');
-}).listen(PORT, () => console.log(`Port ${PORT} open`));
-
-// ✅ أمر /start مع تسجيل الإحالة
 bot.start(async (ctx) => {
   const startPayload = ctx.payload;
   const telegramId = ctx.from.id;
@@ -24,15 +5,65 @@ bot.start(async (ctx) => {
   console.log('📝 Start command');
   console.log('👤 Telegram ID:', telegramId);
   console.log('🔗 Payload:', startPayload);
-  console.log('🌐 API_URL:', API_URL);
   
   // ✅ تسجيل الإحالة إذا كان هناك referral_code
   if (startPayload) {
     try {
-      console.log('📤 Sending referral...');
+      // جلب wallet_id من Supabase
+      console.log('🔍 Fetching wallet_id for user:', telegramId);
+      
+      const { createClient } = require('@supabase/supabase-js');
+      const supabase = createClient(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_SERVICE_ROLE_KEY
+      );
+      
+      const { data: wallet, error: walletError } = await supabase
+        .from('wallets')
+        .select('id')
+        .eq('telegram_id', telegramId)
+        .single();
+      
+      let walletId;
+      
+      if (walletError || !wallet) {
+        // المستخدم جديد - لا يوجد محفظة بعد
+        // نسجل الإحالة لاحقاً عند إنشاء المحفظة
+        console.log('⚠️ No wallet yet - deferring referral');
+        
+        // حل بديل: تخزين مؤقت في جدول منفصل أو استخدام telegram_id مؤقتاً
+        // لكن الأفضل: إنشاء محفظة مؤقتة أو الانتظار
+        
+        // ✅ الحل الأبسط: إنشاء محفظة الآن
+        const { data: newWallet, error: createError } = await supabase
+          .from('wallets')
+          .insert({
+            telegram_id: telegramId,
+            balance: 0,
+            total_earned: 0
+          })
+          .select()
+          .single();
+        
+        if (createError) throw createError;
+        walletId = newWallet.id;
+        console.log('✅ Created wallet:', walletId);
+        
+        // إنشاء سجل المكافآت اليومية
+        await supabase.from('daily_rewards').insert({
+          wallet_id: walletId
+        });
+        
+      } else {
+        walletId = wallet.id;
+        console.log('✅ Found wallet:', walletId);
+      }
+      
+      // ✅ تسجيل الإحالة باستخدام wallet_id (UUID)
+      console.log('📤 Sending referral with wallet_id:', walletId);
       
       const response = await axios.post(`${API_URL}/api/referrals/register`, {
-        new_user_id: telegramId,  // ✅ bigint بعد تغيير قاعدة البيانات
+        new_user_id: walletId,  // ✅ UUID
         referral_code: startPayload
       });
       
@@ -40,8 +71,7 @@ bot.start(async (ctx) => {
       
     } catch (error) {
       console.log('❌ Referral error:', error.message);
-      console.log('Error code:', error.response?.status);
-      console.log('Error data:', error.response?.data);
+      console.log('Error details:', error.response?.data);
     }
   } else {
     console.log('⚠️ No payload - direct start');
@@ -62,16 +92,3 @@ bot.start(async (ctx) => {
     }
   );
 });
-
-// ✅ أمر /help
-bot.help((ctx) => {
-  ctx.reply('📚 /start - فتح المحفظة');
-});
-
-// ✅ تشغيل البوت
-bot.launch()
-  .then(() => console.log('🤖 Bot started successfully'))
-  .catch(err => console.error('❌ Bot error:', err));
-
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
