@@ -8,6 +8,8 @@ const rewardRoutes = require('./routes/rewards');
 const taskRoutes = require('./routes/tasks');
 const referralRoutes = require('./routes/referrals');
 
+app.use('/api/referrals', referralRoutes);
+
 const app = express();
 
 app.use(cors({
