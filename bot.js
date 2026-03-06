@@ -1,35 +1,28 @@
-require('dotenv').config();
-
-const { Telegraf } = require('telegraf');
-const axios = require('axios');
-const http = require('http');
-
-const bot = new Telegraf(process.env.BOT_TOKEN);
-
-const API_URL = process.env.API_URL || 'https://syt-wallet-backend.onrender.com';
-const MINI_APP_URL = process.env.MINI_APP_URL;
-
-// ✅ Port وهمي لـ Render
-const PORT = process.env.PORT || 3000;
-http.createServer((req, res) => {
-  res.writeHead(200);
-  res.end('Bot is running');
-}).listen(PORT, () => console.log(`Port ${PORT} open`));
-
-// أمر /start
 bot.start(async (ctx) => {
   const startPayload = ctx.payload;
   
+  console.log('📝 Start command received');
+  console.log('👤 User ID:', ctx.from.id);
+  console.log('🔗 Payload:', startPayload);
+  console.log('🌐 API_URL:', API_URL);
+  
   if (startPayload) {
     try {
-      await axios.post(`${API_URL}/api/referrals/register`, {
+      console.log('📤 Sending referral request...');
+      
+      const response = await axios.post(`${API_URL}/api/referrals/register`, {
         new_user_id: ctx.from.id,
         referral_code: startPayload
       });
-      console.log('✅ Referral registered:', startPayload);
+      
+      console.log('✅ Referral success:', response.data);
+      
     } catch (error) {
-      console.log('Referral error:', error.message);
+      console.log('❌ Referral error:', error.message);
+      console.log('Error details:', error.response?.data);
     }
+  } else {
+    console.log('⚠️ No payload - not a referral');
   }
   
   await ctx.reply(
@@ -46,14 +39,3 @@ bot.start(async (ctx) => {
     }
   );
 });
-
-bot.help((ctx) => {
-  ctx.reply('/start - فتح المحفظة');
-});
-
-bot.launch()
-  .then(() => console.log('🤖 Bot started'))
-  .catch(err => console.error('❌ Error:', err));
-
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
