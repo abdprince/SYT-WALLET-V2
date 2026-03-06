@@ -2,70 +2,96 @@ require('dotenv').config();
 
 const { Telegraf } = require('telegraf');
 const axios = require('axios');
-const express = require('express');
+const http = require('http');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
-const app = express();
 
-app.use(express.json());
-
-const API_URL = process.env.VERCEL_URL || 'https://your-backend.vercel.app';
+const API_URL = process.env.API_URL || 'https://syt-wallet-v2.onrender.com';
 const MINI_APP_URL = process.env.MINI_APP_URL;
 
-// ✅ Webhook endpoint
-app.post('/webhook', (req, res) => {
-  bot.handleUpdate(req.body);
-  res.sendStatus(200);
-});
+// Port وهمي للـ Render
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end('Bot is running');
+}).listen(PORT, () => console.log(`Port ${PORT} open`));
 
-// ✅ أمر /start
+// ✅ /start - تسجيل إحالة + فتح Mini App
 bot.start(async (ctx) => {
   const startPayload = ctx.payload;
   const telegramId = ctx.from.id;
   
-  console.log('📝 Start:', telegramId, 'Payload:', startPayload);
+  console.log('📝 Start command');
+  console.log('👤 Telegram ID:', telegramId);
+  console.log('🔗 Payload:', startPayload);
   
   if (startPayload) {
     try {
-      // جلب أو إنشاء محفظة
+      console.log('🔍 Fetching wallet...');
+      
       const { createClient } = require('@supabase/supabase-js');
       const supabase = createClient(
         process.env.SUPABASE_URL,
         process.env.SUPABASE_SERVICE_ROLE_KEY
       );
       
-      let { data: wallet } = await supabase
+      let { data: wallet, error: walletError } = await supabase
         .from('wallets')
         .select('id')
         .eq('telegram_id', telegramId)
         .single();
       
-      if (!wallet) {
-        const { data: newWallet } = await supabase
+      let walletId;
+      
+      if (walletError || !wallet) {
+        console.log('⚠️ Creating new wallet...');
+        
+        const { data: newWallet, error: createError } = await supabase
           .from('wallets')
-          .insert({ telegram_id: telegramId, balance: 0, total_earned: 0 })
+          .insert({
+            telegram_id: telegramId,
+            balance: 0,
+            total_earned: 0
+          })
           .select()
           .single();
-        wallet = newWallet;
         
-        await supabase.from('daily_rewards').insert({ wallet_id: wallet.id });
+        if (createError) throw createError;
+        
+        walletId = newWallet.id;
+        console.log('✅ Created wallet:', walletId);
+        
+        await supabase.from('daily_rewards').insert({
+          wallet_id: walletId
+        });
+        
+      } else {
+        walletId = wallet.id;
+        console.log('✅ Found wallet:', walletId);
       }
       
-      // تسجيل الإحالة
-      await axios.post(`${API_URL}/api/referrals/register`, {
-        new_user_id: wallet.id,
+      console.log('📤 Registering referral...');
+      
+      const response = await axios.post(`${API_URL}/api/referrals/register`, {
+        new_user_id: walletId,
         referral_code: startPayload
       });
       
-      console.log('✅ Referral registered');
+      console.log('✅ Referral success:', response.data);
       
     } catch (error) {
-      console.log('❌ Error:', error.message);
+      console.log('❌ Referral error:', error.message);
+      console.log('Error details:', error.response?.data);
     }
+  } else {
+    console.log('⚠️ No payload - direct start');
   }
   
   await ctx.reply(
-    '👋 مرحباً بك في SYT Wallet!',
+    '👋 مرحباً بك في SYT Wallet!\n\n' +
+    '💰 اربح العملات من المكافآت اليومية والمهام\n' +
+    '👥 ادعو أصدقاءك واحصل على 50 SYT لكل صديق\n\n' +
+    'اضغط الزر أدناه لفتح محفظتك:',
     {
       reply_markup: {
         inline_keyboard: [[
@@ -76,31 +102,14 @@ bot.start(async (ctx) => {
   );
 });
 
-// ✅ API routes
-const authRoutes = require('./routes/auth');
-const walletRoutes = require('./routes/wallet');
-const rewardRoutes = require('./routes/rewards');
-const taskRoutes = require('./routes/tasks');
-const referralRoutes = require('./routes/referrals');
-
-app.use('/api/auth', authRoutes);
-app.use('/api/wallet', walletRoutes);
-app.use('/api/rewards', rewardRoutes);
-app.use('/api/tasks', taskRoutes);
-app.use('/api/referrals', referralRoutes);
-
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK' });
+bot.help((ctx) => {
+  ctx.reply('/start - فتح المحفظة');
 });
 
-// ✅ تشغيل
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server on port ${PORT}`);
-  
-  // تعيين Webhook
-  const webhookUrl = `${API_URL}/webhook`;
-  bot.telegram.setWebhook(webhookUrl)
-    .then(() => console.log('✅ Webhook set:', webhookUrl))
-    .catch(err => console.log('❌ Webhook error:', err.message));
-});
+// ✅ تشغيل بالـ Polling (بدون Webhook)
+bot.launch()
+  .then(() => console.log('🤖 Bot started successfully'))
+  .catch(err => console.error('❌ Bot error:', err));
+
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
