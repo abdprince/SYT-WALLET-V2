@@ -1,23 +1,46 @@
 require('dotenv').config();
-const { Telegraf } = require('telegraf');
 
-console.log('MINI_APP_URL:', process.env.MINI_APP_URL);
+const { Telegraf } = require('telegraf');
+const axios = require('axios');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-bot.start((ctx) => {
-  console.log('Sending button with URL:', process.env.MINI_APP_URL);
+const API_URL = process.env.API_URL || 'https://syt-wallet-backend.onrender.com';
+const MINI_APP_URL = process.env.MINI_APP_URL;
+
+// أمر /start
+bot.start(async (ctx) => {
+  const startPayload = ctx.payload;
   
-  ctx.reply('Test', {
-    reply_markup: {
-      inline_keyboard: [[
-        { 
-          text: '💼 فتح المحفظة', 
-          web_app: { url: process.env.MINI_APP_URL || 'https://syt-wallet-frontend.vercel.app' } 
-        }
-      ]]
+  if (startPayload) {
+    try {
+      await axios.post(`${API_URL}/api/referrals/register`, {
+        new_user_id: ctx.from.id,
+        referral_code: startPayload
+      });
+      console.log('✅ Referral registered:', startPayload);
+    } catch (error) {
+      console.log('Referral error:', error.message);
     }
-  });
+  }
+  
+  await ctx.reply(
+    '👋 مرحباً بك في SYT Wallet!\n\n' +
+    '💰 اربح العملات من المكافآت اليومية والمهام\n' +
+    '👥 ادعو أصدقاءك واحصل على 50 SYT لكل صديق\n\n' +
+    'اضغط الزر أدناه لفتح محفظتك:',
+    {
+      reply_markup: {
+        inline_keyboard: [[
+          { text: '💼 فتح المحفظة', web_app: { url: MINI_APP_URL } }
+        ]]
+      }
+    }
+  );
+});
+
+bot.help((ctx) => {
+  ctx.reply('/start - فتح المحفظة');
 });
 
 bot.launch()
